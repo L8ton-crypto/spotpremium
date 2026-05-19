@@ -5,9 +5,36 @@ import { DEALERS } from "@/lib/dealers";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-// Return the last N days of snapshots, grouped by product + dealer.
+// 30 minutes - lazy refresh threshold. Reads will trigger a background refresh
+// if the newest successful snapshot is older than this.
+const STALE_MS = 30 * 60 * 1000;
+
+async function maybeTriggerLazyRefresh(req: Request) {
+  try {
+    const rows = (await sql`
+      SELECT taken_at FROM sp_snapshots WHERE status = 'ok'
+      ORDER BY taken_at DESC LIMIT 1
+    `) as { taken_at: string }[];
+    const latest = rows[0]?.taken_at ? new Date(rows[0].taken_at).getTime() : 0;
+    if (Date.now() - latest < STALE_MS) return;
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return;
+    const origin = new URL(req.url).origin;
+    // Fire and forget. Do not await.
+    fetch(`${origin}/api/refresh`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${secret}` },
+      cache: "no-store"
+    }).catch(() => {});
+  } catch {
+    // best-effort, never block the read
+  }
+}
+
 export async function GET(req: Request) {
   await ensureDb();
+  await maybeTriggerLazyRefresh(req);
+
   const url = new URL(req.url);
   const days = Math.max(1, Math.min(30, parseInt(url.searchParams.get("days") ?? "7", 10)));
 

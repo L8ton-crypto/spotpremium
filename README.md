@@ -10,35 +10,45 @@ Premium widening is a tradeable signal for the physical retail market. This tool
 - Tailwind, dark mode, mobile-first
 - Neon serverless Postgres for snapshot storage
 - Chart.js for the premium chart
-- Vercel cron for hourly snapshots
+- Vercel cron for the daily baseline + lazy refresh on page visits
 - @vercel/analytics + @vercel/speed-insights
 
 ## Architecture
 
 ```
 GET  /                    Server-rendered chart + table per product
-GET  /api/snapshots       Read snapshots (default last 7 days)
-GET  /api/refresh         Trigger a fresh snapshot (CRON_SECRET required)
-GET  /api/spot            Debug endpoint: current spot for silver and gold
+GET  /api/snapshots       Read snapshots (default last 7 days). Triggers a
+                          background refresh if the newest snapshot is over 30
+                          minutes old.
+GET  /api/refresh         Trigger a fresh snapshot (CRON_SECRET required).
+                          Also called by the Vercel cron once per day.
+GET  /api/spot            Debug endpoint: current spot for silver and gold.
 ```
 
-Snapshots are taken hourly by `vercel.json` cron pointing at `/api/refresh`. Each snapshot fetches spot prices for silver and gold from Yahoo Finance (SI=F, GC=F nearby futures) and scrapes each of the 8 dealer product pages.
+### Refresh model
+
+Two refresh paths feed the same database:
+
+1. Vercel cron hits `/api/refresh` once per day at 06:00 UTC. This is the baseline that always runs, even if no one visits the site.
+2. Page visits (or anyone hitting `/api/snapshots`) trigger a background refresh if the newest successful snapshot is more than 30 minutes old. The visitor still gets the previous snapshot immediately, no waiting.
+
+Together these give frequent updates while the site is being used, without spending a cron slot per hour.
 
 ## Scraping
 
 Each scrape tries three strategies in order:
 
 1. JSON-LD `Product.offers.price` (most reliable)
-2. `<meta itemprop="price">` or `product:price:amount`
+2. `<meta itemprop="price">`, `product:price:amount`, or `og:price:amount`
 3. Regex fallback over the first 60KB of HTML with metal-specific sanity bounds
 
-Sanity bounds reject prices outside plausible ranges per product class so a banner figure does not pollute the data. Failed scrapes are written to the DB as `scrape_error` with the failure reason in `note`.
+Sanity bounds reject prices outside plausible ranges per product class so a banner figure does not pollute the data. Failed scrapes are written to the DB as `scrape_error` with the failure reason in `note`. A 15-second timeout per dealer keeps the refresh under the function timeout budget.
 
 ## Env
 
 ```
 DATABASE_URL=postgresql://...neon.tech/neondb?sslmode=require
-CRON_SECRET=...
+CRON_SECRET=long-random-string
 ```
 
 ## Data model
@@ -64,11 +74,12 @@ npm install
 echo "DATABASE_URL=..." > .env.local
 echo "CRON_SECRET=anything" >> .env.local
 npm run dev
-# Then curl http://localhost:3000/api/refresh?key=anything to take a snapshot
+# Then curl 'http://localhost:3000/api/refresh?key=anything' to take a snapshot
 ```
 
 ## Notes
 
-- Spot is the nearby futures contract, not LBMA spot. Difference is typically under 0.5%.
+- Spot is the nearby futures contract (SI=F for silver, GC=F for gold) from Yahoo Finance, not LBMA spot. Difference is typically under 0.5% for nearby contracts.
 - Some dealers (APMEX, JM Bullion) sit behind Cloudflare. Scrapes may intermittently fail. The table shows the last successful snapshot.
 - Premium thresholds in the table: green under 12%, amber 12-25%, red over 25%.
+- Not financial advice.
