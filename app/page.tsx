@@ -32,7 +32,16 @@ async function loadData() {
     ORDER BY product, dealer, taken_at DESC
   `) as any[];
 
-  return { rows, latestRows };
+  // Last successful snapshot per dealer/product, used to age out badges.
+  const lastOkRows = (await sql`
+    SELECT DISTINCT ON (product, dealer)
+      taken_at, product, dealer, note
+    FROM sp_snapshots
+    WHERE status = 'ok'
+    ORDER BY product, dealer, taken_at DESC
+  `) as any[];
+
+  return { rows, latestRows, lastOkRows };
 }
 
 function fmtMoney(n: number | null) {
@@ -57,8 +66,63 @@ function fmtAgo(iso: string | null) {
   return `${d} d ago`;
 }
 
+type DealerStatus = "ok" | "ok_fallback" | "stale" | "blocked" | "spot_error" | "no_data";
+
+function classifyDealer(latest: any, lastOk: any, now: number): DealerStatus {
+  if (!latest) return "no_data";
+  const STALE_MS = 6 * 60 * 60 * 1000;
+  if (latest.status === "ok") {
+    const okAge = lastOk ? now - new Date(lastOk.taken_at).getTime() : null;
+    if (okAge != null && okAge > STALE_MS) return "stale";
+    return latest.note === "aggregator" ? "ok_fallback" : "ok";
+  }
+  if (latest.status === "spot_error") return "spot_error";
+  return "blocked";
+}
+
+function StatusBadge({ status }: { status: DealerStatus }) {
+  const config: Record<DealerStatus, { dot: string; label: string; title: string }> = {
+    ok: {
+      dot: "bg-good shadow-[0_0_8px_#16a34a]",
+      label: "live",
+      title: "Direct dealer scrape succeeded"
+    },
+    ok_fallback: {
+      dot: "bg-accent shadow-[0_0_8px_#f59e0b]",
+      label: "fallback",
+      title: "Direct scrape blocked, price from aggregator"
+    },
+    stale: {
+      dot: "bg-accent",
+      label: "stale",
+      title: "Last successful snapshot is more than 6h old"
+    },
+    blocked: {
+      dot: "bg-bad shadow-[0_0_8px_#dc2626]",
+      label: "blocked",
+      title: "Dealer site blocking or product page missing"
+    },
+    spot_error: {
+      dot: "bg-muted",
+      label: "spot",
+      title: "Spot lookup failed at last refresh"
+    },
+    no_data: { dot: "bg-line", label: "no data", title: "No snapshot yet" }
+  };
+  const c = config[status];
+  return (
+    <span
+      title={c.title}
+      className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted"
+    >
+      <span className={`inline-block h-2 w-2 rounded-full ${c.dot}`} aria-hidden />
+      {c.label}
+    </span>
+  );
+}
+
 export default async function Page() {
-  const { rows, latestRows } = await loadData();
+  const { rows, latestRows, lastOkRows } = await loadData();
 
   const series = rows.map((r) => ({
     takenAt: new Date(r.taken_at).toISOString(),
@@ -69,9 +133,12 @@ export default async function Page() {
 
   const latestByKey = new Map<string, any>();
   for (const r of latestRows) latestByKey.set(`${r.product}__${r.dealer}`, r);
+  const lastOkByKey = new Map<string, any>();
+  for (const r of lastOkRows) lastOkByKey.set(`${r.product}__${r.dealer}`, r);
 
   const products: ("silver_eagle_1oz" | "gold_eagle_1oz")[] = ["silver_eagle_1oz", "gold_eagle_1oz"];
   const hasData = series.length > 0;
+  const now = Date.now();
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-10 sm:py-14">
@@ -126,20 +193,25 @@ export default async function Page() {
                 <tbody>
                   {productRows.map((d) => {
                     const r = latestByKey.get(`${p}__${d.key}`);
+                    const ok = lastOkByKey.get(`${p}__${d.key}`);
                     const dealerPrice = r ? Number(r.dealer_price) : null;
                     const spot = r ? Number(r.spot_price) : null;
                     const prem = r ? Number(r.premium_pct) : null;
+                    const status = classifyDealer(r, ok, now);
                     return (
                       <tr key={d.key} className="border-t border-line">
                         <td className="px-4 py-3">
-                          <a
-                            href={d.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="hover:text-accent"
-                          >
-                            {DEALER_LABELS[d.key]}
-                          </a>
+                          <div className="flex items-center gap-3">
+                            <a
+                              href={d.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="hover:text-accent"
+                            >
+                              {DEALER_LABELS[d.key]}
+                            </a>
+                            <StatusBadge status={status} />
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-right">{fmtMoney(dealerPrice)}</td>
                         <td className="px-4 py-3 text-right">{fmtMoney(spot)}</td>
@@ -175,8 +247,9 @@ export default async function Page() {
         <p>
           Premium is calculated as (dealer price - spot) / spot. Spot price is the nearby futures
           contract (SI=F for silver, GC=F for gold) sourced from Yahoo Finance. Dealer prices are
-          scraped from public product pages and may lag the dealer site by up to one hour. Not
-          financial advice.
+          scraped from public product pages and may lag the dealer site by up to one hour. When a
+          dealer blocks direct scraping, the price falls back to the findbullionprices.com
+          aggregator. Not financial advice.
         </p>
       </footer>
     </main>

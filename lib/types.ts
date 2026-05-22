@@ -8,7 +8,14 @@ export type DealerConfig = {
   url: string;
   product: ProductKey;
   metal: Metal;
+  // Homepage hit first for cookie warm-up on dealers behind anti-bot.
+  homepageUrl?: string;
+  // Slug used by the findbullionprices.com aggregator fallback to extract
+  // this dealer's row from the comparison page.
+  aggregatorSlug?: string;
 };
+
+export type ScrapeSource = "json-ld" | "meta" | "regex" | "aggregator";
 
 export type Snapshot = {
   id: number;
@@ -23,5 +30,5 @@ export type Snapshot = {
 };
 
 export type ScrapeResult =
-  | { ok: true; price: number; source: "json-ld" | "meta" | "regex" }
+  | { ok: true; price: number; source: ScrapeSource }
   | { ok: false; error: string };
