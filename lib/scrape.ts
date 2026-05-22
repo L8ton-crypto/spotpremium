@@ -106,7 +106,7 @@ const BOUNDS: Record<string, [number, number]> = {
 function collectCookies(res: Response): string {
   // Headers iteration handles repeated Set-Cookie correctly in Node 18+.
   const pairs: string[] = [];
-  // @ts-expect-error - Headers.raw / .getSetCookie() exists in node fetch
+  
   const sc: string[] | undefined = res.headers.getSetCookie?.();
   if (sc && sc.length) {
     for (const line of sc) {
