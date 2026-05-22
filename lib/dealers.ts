@@ -34,7 +34,7 @@ export const DEALERS: DealerConfig[] = [
     product: "silver_eagle_1oz",
     // Refreshed 2026-05-22. Previous /2025-american-silver-eagle-coin-1oz returned 404.
     // SD Bullion canonical pattern is /<year>-1-oz-american-silver-eagle-coin.
-    url: "https://sdbullion.com/2026-1-oz-american-silver-eagle-coin",
+    url: "https://sdbullion.com/2026-1-oz-american-silver-eagle-coin-bu",
     homepageUrl: "https://sdbullion.com/",
     aggregatorSlug: "sd-bullion"
   },
@@ -71,7 +71,7 @@ export const DEALERS: DealerConfig[] = [
     metal: "gold",
     product: "gold_eagle_1oz",
     // Refreshed 2026-05-22. Previous /1-oz-american-gold-eagle-coin-2025 returned 404.
-    url: "https://sdbullion.com/2026-1-oz-american-gold-eagle-coin",
+    url: "https://sdbullion.com/2026-1-oz-american-gold-eagle-coin-bu",
     homepageUrl: "https://sdbullion.com/",
     aggregatorSlug: "sd-bullion"
   },
@@ -100,6 +100,6 @@ export const DEALER_LABELS: Record<string, string> = {
 
 // findbullionprices.com product paths, used by the aggregator fallback.
 export const AGGREGATOR_PATHS: Record<string, string> = {
-  silver_eagle_1oz: "https://findbullionprices.com/silver-bullion/silver-american-eagle-1-oz",
-  gold_eagle_1oz: "https://findbullionprices.com/gold-bullion/gold-american-eagle-1-oz"
+  silver_eagle_1oz: "https://findbullionprices.com/p/American-Silver-Eagle-Random-Year/",
+  gold_eagle_1oz: "https://findbullionprices.com/p/Random-Year-1-oz-American-Gold-Eagle/"
 };
